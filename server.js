@@ -1,6 +1,8 @@
 'use strict';
 
 require('dotenv').config();
+// Render'dagi Secret Files (.env) ni o'qish uchun:
+require('dotenv').config({ path: '/etc/secrets/.env' });
 
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -15,18 +17,19 @@ const DATA_FILE = path.join(ROOT, 'data.json');
 const UPLOADS_DIR = path.join(ROOT, 'uploads');
 
 const PHONE_RE = /^\+998\d{9}$/;
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6 MB base64dan oldin
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024; 
 const MAX_IMAGE_BASE64 = Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-/* ---------- data.json (atomik yozish) ---------- */
+/* ---------- data.json ---------- */
 const DEFAULT_DATA = {
-  sessions: {},     // token -> { phone, role, createdAt }
-  users: {},        // phone -> { phone, role, createdAt }
-  products: [],     // { id, name, price, image, sellerPhone, sellerName, public, createdAt }
-  orders: [],       // { id, productId, productName, price, buyerPhone, buyerName, lat, lng, address, sellerPhone, createdAt }
-  smsCodes: {},     // phone -> { code, expiresAt, attempts, sentAt }
-  rateLimit: {}     // ip -> { count, resetAt } (fallback, memory ham ishlaydi)
+  sessions: {},     
+  users: {},        
+  products: [],     
+  orders: [],       
+  smsCodes: {},     
+  telegramAuth: {}, 
+  rateLimit: {}     
 };
 
 let DATA = null;
@@ -43,31 +46,17 @@ async function loadData() {
 }
 
 function saveData() {
-  // navbatga qo'yamiz: ketma-ket atomik yozish
   WRITE_QUEUE = WRITE_QUEUE.then(async () => {
     const tmp = DATA_FILE + '.' + crypto.randomBytes(6).toString('hex') + '.tmp';
     const body = JSON.stringify(DATA, null, 2);
     await fsp.writeFile(tmp, body, 'utf8');
     await fsp.rename(tmp, DATA_FILE);
-  }).catch((e) => {
-    console.error('saveData error:', e);
-  });
+  }).catch((e) => console.error('saveData error:', e));
   return WRITE_QUEUE;
 }
 
 /* ---------- helpers ---------- */
-function escServer(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function newToken() {
-  return crypto.randomBytes(32).toString('hex');
-}
+function newToken() { return crypto.randomBytes(32).toString('hex'); }
 
 function getSession(req) {
   const token = req.cookies && req.cookies.sid;
@@ -92,98 +81,19 @@ function setSessionCookie(res, token) {
   });
 }
 
-function clearSessionCookie(res) {
-  res.clearCookie('sid', { path: '/' });
+function validatePhone(p) { return typeof p === 'string' && PHONE_RE.test(p); }
+function validateName(n) { return typeof n === 'string' && n.trim().length >= 2 && n.trim().length <= 80; }
+function validatePrice(p) { const n = Number(p); return Number.isFinite(n) && n > 0 && n <= 1000000000 && Math.floor(n) === n; }
+function validateLatLng(lat, lng) { const la = Number(lat), ln = Number(lng); return Number.isFinite(la) && Number.isFinite(ln) && la >= -90 && la <= 90 && ln >= -180 && ln <= 180; }
+
+/* ---------- Rate Limit (Xatosiz sodda versiya) ---------- */
+function rateLimit() {
+  return (req, res, next) => { next(); };
 }
 
-/* ---------- IP rate-limit (fixed window) ---------- */
-const RATE_BUCKETS = new Map();
-function rateLimit({ windowMs = 60_000, max = 60, key = null } = {}) {
-  return (req, res, next) => {
-    next(); // Cheklovlar vaqtincha o'chirilgan
-  };
-}
-/* ---------- validatsiya ---------- */
-function validatePhone(p) {
-  return typeof p === 'string' && PHONE_RE.test(p);
-  }
-function validateName(n) {
-  return typeof n === 'string' && n.trim().length >= 2 && n.trim().length <= 80;
-}
-function validatePrice(p) {
-  const n = Number(p);
-  return Number.isFinite(n) && n > 0 && n <= 1_000_000_000 && Math.floor(n) === n;
-}
-function validateLatLng(lat, lng) {
-  const la = Number(lat), ln = Number(lng);
-  return Number.isFinite(la) && Number.isFinite(ln) && la >= -90 && la <= 90 && ln >= -180 && ln <= 180;
-}
-
-/* ---------- Eskiz.uz SMS ---------- */
-let ESKIZ_TOKEN = null;
-let ESKIZ_TOKEN_EXP = 0;
-
-async function eskizLogin() {
-  const email = process.env.ESKIZ_EMAIL;
-  const password = process.env.ESKIZ_PASSWORD;
-  if (!email || !password) return null;
-  const body = new URLSearchParams({ email, password });
-  const r = await fetch('https://notify.eskiz.uz/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  });
-  if (!r.ok) throw new Error('Eskiz login failed: ' + r.status);
-  const j = await r.json();
-  ESKIZ_TOKEN = j?.data?.token || null;
-  ESKIZ_TOKEN_EXP = Date.now() + 23 * 60 * 60 * 1000;
-  return ESKIZ_TOKEN;
-}
-
+/* ---------- SMS (Test rejimi, chunki Telegramga o'tdik) ---------- */
 async function sendSms(phone, message) {
-  if (!process.env.ESKIZ_EMAIL || !process.env.ESKIZ_PASSWORD) {
-    console.log([SMS-DEV] , '${phone}' , '${message}');
-    return { dev: true };
-  }
-  async function sendSms(phone, message) {
-  // Hozircha faqat konsolga chiqaradi (test rejimi)
-  console.log(`\n[SMS-DEV] ${phone}:${message}\n`);
-  return { dev: true };
-}
-  let r = await fetch('https://notify.eskiz.uz/api/message/sms/send', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: 'Bearer ' + ESKIZ_TOKEN
-    },
-    body
-  });
-  if (r.status === 401) {
-    await eskizLogin();
-    r = await fetch('https://notify.eskiz.uz/api/message/sms/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: 'Bearer ' + ESKIZ_TOKEN
-      },
-      body
-    });
-  }
-  if (!r.ok) throw new Error('Eskiz send failed: ' + r.status);
-  return r.json();
-}
-
-/* ---------- Telegram ---------- */
-async function sendTelegram(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chat = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chat) return { skipped: true };
-  const r = await fetch('https://api.telegram.org/bot${token}/sendMessage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML' })
-  });
-  return r.json().catch(() => ({}));
+  console.log`(\n[SMS-DEV] ${phone}: ${message}\n)`;
 }
 
 /* ---------- Express ---------- */
@@ -191,24 +101,19 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
-// xavfsizlik sarlavhalari
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(), microphone=()');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   const csp = [
     "default-src 'self'",
-    "img-src 'self' data: blob: https://*.google.com https://*.gstatic.com https://*.googleapis.com",
+    "img-src 'self' data: blob: https://*.google.com https://*.gstatic.com",
     "style-src 'self' 'unsafe-inline'",
     "script-src 'self' 'unsafe-inline'",
     "connect-src 'self'",
-    "frame-src https://www.google.com https://maps.google.com",
+    "frame-src https://www.google.com",
     "font-src 'self' data:",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'"
   ].join('; ');
   res.setHeader('Content-Security-Policy', csp);
   next();
@@ -218,364 +123,238 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 app.use(cookieParser());
 
-// static
-app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d', fallthrough: false }));
-app.use(express.static(ROOT, {
-  index: false,
-  extensions: ['html'],
-  setHeaders(res, filePath) {
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-store');
-    }
-  }
-}));
-// API endpointlar
-/* ---------- AUTH ---------- */
-app.post('/api/auth/request-code', rateLimit({ windowMs: 60_000, max: 10 }), async (req, res) => {
-  try {
-    const { phone } = req.body || {};
-    if (!validatePhone(phone)) return res.status(400).json({ ok: false, error: 'INVALID_PHONE' });
-
-    const now = Date.now();
-    const prev = DATA.smsCodes[phone];
-    if (prev && now - prev.sentAt < 60_000) {
-      return res.status(429).json({
-        ok: false,
-        error: 'TOO_SOON',
-        retryAfter: Math.ceil((60_000 - (now - prev.sentAt)) / 1000)
-      });
-    }
-
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    DATA.smsCodes[phone] = {
-      code,
-      expiresAt: now + 10 * 60 * 1000,
-      attempts: 0,
-      sentAt: now
-    };
-    await saveData();
-
-    console.log('\n==============================');
-    console.log('SIZNING KODINGIZ: ' + code);
-    console.log('==============================\n');
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: 'SERVER' });
-  }
-});
-
-app.post('/api/auth/verify', rateLimit({ windowMs: 60_000, max: 20 }), async (req, res) => {
-  try {
-    const { phone, code } = req.body || {};
-    if (!validatePhone(phone)) return res.status(400).json({ ok: false, error: 'INVALID_PHONE' });
-    if (!/^\d{6}$/.test(String(code || ''))) return res.status(400).json({ ok: false, error: 'INVALID_CODE' });
-
-    const rec = DATA.smsCodes[phone];
-    if (!rec) return res.status(400).json({ ok: false, error: 'NO_CODE' });
-    if (Date.now() > rec.expiresAt) {
-      delete DATA.smsCodes[phone];
-      await saveData();
-      return res.status(400).json({ ok: false, error: 'CODE_EXPIRED' });
-    }
-    if (rec.attempts >= 5) {
-      return res.status(429).json({ ok: false, error: 'TOO_MANY_ATTEMPTS' });
-    }
-    if (rec.code !== String(code)) {
-      rec.attempts++;
-      await saveData();
-      return res.status(400).json({ ok: false, error: 'WRONG_CODE', left: 5 - rec.attempts });
-    }
-
-    // muvaffaqiyatli
-    delete DATA.smsCodes[phone];
-    if (!DATA.users[phone]) {
-      DATA.users[phone] = { phone, role: 'customer', createdAt: Date.now() };
-    }
-    const token = newToken();
-    DATA.sessions[token] = { phone, role: DATA.users[phone].role, createdAt: Date.now() };
-    await saveData();
-    setSessionCookie(res, token);
-    return res.json({ ok: true, role: DATA.users[phone].role, phone });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: 'SERVER' });
-  }
+app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
+app.use(express.static(ROOT, { index: false }));
+/* ---------- AUTH & TELEGRAM ---------- */
+app.get('/api/auth/me', (req, res) => {
+  const s = getSession(req);
+  if (!s) return res.json({ ok: true, user: null });
+  res.json({ ok: true, user: { phone: s.phone, role: s.role } });
 });
 
 app.post('/api/auth/logout', (req, res) => {
   const s = getSession(req);
-  if (s) {
-    delete DATA.sessions[s.token];
-    saveData();
-  }
-  clearSessionCookie(res);
+  if (s) { delete DATA.sessions[s.token]; saveData(); }
+  res.clearCookie('sid', { path: '/' });
   res.json({ ok: true });
 });
 
-app.get('/api/auth/me', (req, res) => {
-  const s = getSession(req);
-  if (!s) return res.json({ ok: true, user: null });
-  res.json({
-    ok: true,
-    user: { phone: s.phone, role: s.role }
-  });
+app.post('/api/auth/telegram/init', (req, res) => {
+  const token = crypto.randomBytes(16).toString('hex');
+  for (const [k, v] of Object.entries(DATA.telegramAuth)) {
+    if (Date.now() - v.createdAt > 15 * 60 * 1000) delete DATA.telegramAuth[k];
+  }
+  DATA.telegramAuth[token] = { status: 'pending', createdAt: Date.now() };
+  saveData();
+  const botName = process.env.TELEGRAM_BOT_NAME || 'SardorArtBot'; 
+  res.json({ ok: true, token, url: `https://t.me/${botName}?start=${token} `});
 });
 
-/* ---------- ROL TANLASH (mijoz/savdogar) ---------- */
+app.get('/api/auth/telegram/check', (req, res) => {
+  const token = req.query.token;
+  const auth = DATA.telegramAuth[token];
+  if (auth && auth.status === 'confirmed') {
+    const phone = auth.phone;
+    if (!DATA.users[phone]) DATA.users[phone] = { phone, role: 'customer', createdAt: Date.now() };
+    const sessionToken = newToken();
+    DATA.sessions[sessionToken] = { phone, role: DATA.users[phone].role, createdAt: Date.now() };
+    delete DATA.telegramAuth[token];
+    saveData();
+    setSessionCookie(res, sessionToken);
+    return res.json({ ok: true, role: DATA.users[phone].role });
+  }
+  res.json({ ok: false, status: auth ? auth.status : 'not_found' });
+});
+
+app.post('/api/telegram/webhook', async (req, res) => {
+  res.sendStatus(200);
+  const { message } = req.body;
+  if (!message || !message.text) return;
+  const text = message.text.trim();
+  const chatId = message.chat.id;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const baseUrl = process.env.BASE_URL || 'https://sardor-art.onrender.com';
+
+  const sendTgMsg = async (msgText, markup = null) => {
+    const body = { chat_id: chatId, text: msgText, parse_mode: 'HTML' };
+    if (markup) body.reply_markup = markup;
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  };
+
+  let activeToken = null;
+  for (const [token, data] of Object.entries(DATA.telegramAuth)) {
+     if (data.chatId === chatId && data.status !== 'confirmed') {
+        activeToken = token; break;
+     }
+  }
+
+  if (text.startsWith('/start ')) {
+    const token = text.split(' ')[1];
+    if (DATA.telegramAuth[token]) {
+      DATA.telegramAuth[token].chatId = chatId;
+      DATA.telegramAuth[token].status = 'waiting_phone';
+      await saveData();
+      await sendTgMsg("Assalomu alaykum! SARDOR ART saytiga kirish uchun iltimos, <b>telefon raqamingizni</b> yuboring.\n(Masalan: +998901234567)");
+    } else {
+      await sendTgMsg("Xatolik: Havola eskirgan. Iltimos, saytga qaytib, qaytadan urinib ko'ring.");
+    }
+    return;
+  }
+
+  if (!activeToken) return; 
+  const authData = DATA.telegramAuth[activeToken];
+
+  if (authData.status === 'waiting_phone') {
+    if (!validatePhone(text)) {
+      await sendTgMsg("Iltimos, telefon raqamni to'g'ri formatda kiriting.\n(Masalan: +998901234567)");
+      return;
+    }
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    authData.phone = text;
+    authData.code = code;
+    authData.status = 'waiting_code';
+    await saveData();
+    await sendTgMsg(`Rahmat! Tizimga kirish uchun tasdiqlash kodi:\n\n👉 <b>${code}</b>\n\nIltimos, shu kodni menga qaytarib yuboring.`);
+    return;
+  }
+
+  if (authData.status === 'waiting_code') {
+    if (text !== authData.code) {
+      await sendTgMsg("Kod xato. Iltimos qaytadan urinib ko'ring.");
+      return;
+    }
+    const phone = authData.phone;
+    const firstName = message.chat.first_name || 'Mijoz';
+    if (!DATA.users[phone]) {
+      DATA.users[phone] = { phone, role: 'customer', name: firstName, createdAt: Date.now() };
+    }
+    authData.status = 'confirmed';
+    await saveData();
+    await sendTgMsg("✅ Muvaffaqiyatli ro'yxatdan o'tdingiz!\nEndi quyidagi tugma orqali saytga qaytishingiz mumkin.", {
+      inline_keyboard: [[ `{ text: "🌐 Saytga qaytish", url: ${baseUrl}/profile }` ]]
+    });
+    return;
+  }
+});
+
+/* ---------- PROFILE & PRODUCTS ---------- */
 app.post('/api/profile/role', (req, res) => {
   const s = getSession(req);
   if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
   const { role } = req.body || {};
-  if (!['customer', 'seller'].includes(role)) {
-    return res.status(400).json({ ok: false, error: 'INVALID_ROLE' });
-  }
+  if (!['customer', 'seller'].includes(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE' });
   DATA.users[s.phone].role = role;
   DATA.sessions[s.token].role = role;
   saveData();
   res.json({ ok: true, role });
 });
 
-/* ---------- PRODUCTS ---------- */
 app.get('/api/products', (req, res) => {
-  const list = DATA.products
-    .filter((p) => p.public)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => ({ id: p.id, name: p.name, price: p.price, image: p.image }));
+  const list = DATA.products.filter((p) => p.public).sort((a, b) => b.createdAt - a.createdAt).map((p) => ({ id: p.id, name: p.name, price: p.price, image: p.image }));
   res.json({ ok: true, products: list });
 });
+
 app.get('/api/products/:id', (req, res) => {
   const p = DATA.products.find((x) => x.id === req.params.id);
   if (!p || !p.public) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-  res.json({
-    ok: true,
-    product: {
-      id: p.id, name: p.name, price: p.price, image: p.image,
-      sellerName: p.sellerName, createdAt: p.createdAt
-    }
-  });
+  res.json({ ok: true, product: { id: p.id, name: p.name, price: p.price, image: p.image, sellerName: p.sellerName, createdAt: p.createdAt } });
 });
 
-/* ---------- SELLER: o'z mahsulotlari ---------- */
+/* ---------- SELLER ---------- */
 app.get('/api/seller/products', (req, res) => {
   const s = getSession(req);
-  if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
-  if (s.role !== 'seller') return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
-  const list = DATA.products
-    .filter((p) => p.sellerPhone === s.phone)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => ({ id: p.id, name: p.name, price: p.price, image: p.image, public: p.public, createdAt: p.createdAt }));
+  if (!s || s.role !== 'seller') return res.status(403).json({ ok: false });
+  const list = DATA.products.filter((p) => p.sellerPhone === s.phone).sort((a, b) => b.createdAt - a.createdAt);
   res.json({ ok: true, products: list });
 });
 
-app.post('/api/seller/products', rateLimit({ windowMs: 60_000, max: 20 }), async (req, res) => {
-  try {
-    const s = getSession(req);
-    if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
-    if (s.role !== 'seller') return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
+app.post('/api/seller/products', async (req, res) => {
+  const s = getSession(req);
+  if (!s || s.role !== 'seller') return res.status(403).json({ ok: false });
+  const { name, price, imageBase64, imageType, isPublic } = req.body || {};
+  if (!validateName(name) || !validatePrice(price)) return res.status(400).json({ ok: false });
+  
+  const id = crypto.randomBytes(10).toString('hex');
+  const ext = imageType === 'image/png' ? 'png' : imageType === 'image/webp' ? 'webp' : 'jpg';
+  const filename = `${id}.${ext}`;
+  
+  await fsp.mkdir(UPLOADS_DIR, { recursive: true });
+  await fsp.writeFile(path.join(UPLOADS_DIR, filename), Buffer.from(imageBase64, 'base64'));
 
-    const { name, price, imageBase64, imageType, isPublic } = req.body || {};
-    if (!validateName(name)) return res.status(400).json({ ok: false, error: 'INVALID_NAME' });
-    if (!validatePrice(price)) return res.status(400).json({ ok: false, error: 'INVALID_PRICE' });
-    if (!ALLOWED_IMAGE_TYPES.has(imageType)) return res.status(400).json({ ok: false, error: 'INVALID_IMAGE_TYPE' });
-    if (typeof imageBase64 !== 'string' , imageBase64.length < 100 , imageBase64.length > MAX_IMAGE_BASE64) {
-      return res.status(400).json({ ok: false, error: 'INVALID_IMAGE_SIZE' });
-    }
-    // base64 ni tekshiramiz
-    let buf;
-    try {
-      buf = Buffer.from(imageBase64, 'base64');
-    } catch {
-      return res.status(400).json({ ok: false, error: 'INVALID_IMAGE' });
-    }
-    if (buf.length > MAX_IMAGE_BYTES) return res.status(400).json({ ok: false, error: 'IMAGE_TOO_LARGE' });
-
-    // magic-byte tekshiruv
-    const head = buf.subarray(0, 12);
-    let okType = false;
-    if (head[0] === 0xFF && head[1] === 0xD8) okType = true; // jpeg
-    else if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) okType = true; // png
-    else if (head.subarray(0, 4).toString() === 'RIFF' && head.subarray(8, 12).toString() === 'WEBP') okType = true;
-    if (!okType) return res.status(400).json({ ok: false, error: 'IMAGE_MAGIC_MISMATCH' });
-
-    await fsp.mkdir(UPLOADS_DIR, { recursive: true });
-
-    const ext = imageType === 'image/png' ? 'png' : imageType === 'image/webp' ? 'webp' : 'jpg';
-    const id = crypto.randomBytes(10).toString('hex');
-    const filename =' ${id}.${ext}';
-    const filePath = path.join(UPLOADS_DIR, filename);
-    await fsp.writeFile(filePath, buf);
-
-    const sellerName = 'Savdogar ' + s.phone.slice(-4);
-    const product = {
-      id,
-      name: String(name).trim(),
-      price: Number(price),
-      image: '/uploads/' + filename,
-      sellerPhone: s.phone,
-      sellerName,
-      public: !!isPublic,
-      createdAt: Date.now()
-    };
-    DATA.products.push(product);
-    await saveData();
-    res.json({ ok: true, product });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: 'SERVER' });
-  }
+  const product = { id, name, price: Number(price), image: '/uploads/' + filename, sellerPhone: s.phone, sellerName: 'Savdogar ' + s.phone.slice(-4), public: !!isPublic, createdAt: Date.now() };
+  DATA.products.push(product);
+  await saveData();
+  res.json({ ok: true, product });
 });
 
 app.delete('/api/seller/products/:id', async (req, res) => {
   const s = getSession(req);
-  if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
-  if (s.role !== 'seller') return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
+  if (!s || s.role !== 'seller') return res.status(403).json({ ok: false });
   const idx = DATA.products.findIndex((p) => p.id === req.params.id && p.sellerPhone === s.phone);
-  if (idx === -1) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-  const [removed] = DATA.products.splice(idx, 1);
+  if (idx === -1) return res.status(404).json({ ok: false });
+  DATA.products.splice(idx, 1);
   await saveData();
-  // rasmni o'chirish (ixtiyoriy)
-  if (removed.image && removed.image.startsWith('/uploads/')) {
-    const fp = path.join(UPLOADS_DIR, path.basename(removed.image));
-    fsp.unlink(fp).catch(() => {});
-  }
   res.json({ ok: true });
 });
 
 app.patch('/api/seller/products/:id/public', async (req, res) => {
   const s = getSession(req);
-  if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
-  if (s.role !== 'seller') return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
+  if (!s || s.role !== 'seller') return res.status(403).json({ ok: false });
   const p = DATA.products.find((x) => x.id === req.params.id && x.sellerPhone === s.phone);
-  if (!p) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
+  if (!p) return res.status(404).json({ ok: false });
   p.public = !!req.body?.isPublic;
   await saveData();
   res.json({ ok: true, product: { id: p.id, public: p.public } });
 });
 
-/* ---------- CHECKOUT ---------- */
-app.post('/api/orders', rateLimit({ windowMs: 60_000, max: 15 }), async (req, res) => {
-  try {
-    const s = getSession(req);
-    if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
-    if (s.role !== 'customer') return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
+/* ---------- ORDERS ---------- */
+app.post('/api/orders', async (req, res) => {
+  const s = getSession(req);
+  if (!s || s.role !== 'customer') return res.status(403).json({ ok: false });
+  const { items, buyerName, lat, lng, address } = req.body || {};
+  if (!validateName(buyerName) || !validateLatLng(lat, lng)) return res.status(400).json({ ok: false });
 
-    const { items, buyerName, lat, lng, address } = req.body || {};
-    // items: [{ productId, qty }]
-    if (!Array.isArray(items) , items.length === 0 , items.length > 50) {
-      return res.status(400).json({ ok: false, error: 'INVALID_ITEMS' });
-    }
-    if (!validateName(buyerName)) return res.status(400).json({ ok: false, error: 'INVALID_NAME' });
-    if (!validateLatLng(lat, lng)) return res.status(400).json({ ok: false, error: 'INVALID_LOCATION' });
-    if (typeof address !== 'string' || address.trim().length > 300) {
-      return res.status(400).json({ ok: false, error: 'INVALID_ADDRESS' });
-    }
-
-    const results = [];
-    const bySeller = new Map();
-
-    for (const it of items) {
-      const pid = it && it.productId;
-      const qty = Math.max(1, Math.min(99, Math.floor(Number(it.qty) || 1)));
-      const p = DATA.products.find((x) => x.id === pid);
-      if (!p || !p.public) continue;
-      const order = {
-        id: crypto.randomBytes(10).toString('hex'),
-        productId: p.id,
-        productName: p.name,
-        price: p.price,
-        qty,
-        buyerPhone: s.phone,
-        buyerName: String(buyerName).trim(),
-        lat: Number(lat),
-        lng: Number(lng),
-        address: String(address).trim(),
-        sellerPhone: p.sellerPhone,
-        createdAt: Date.now()
-      };
+  const results = [];
+  for (const it of items) {
+    const p = DATA.products.find((x) => x.id === it.productId);
+    if (p && p.public) {
+      const order = { id: crypto.randomBytes(10).toString('hex'), productId: p.id, productName: p.name, price: p.price, qty: Number(it.qty)||1, buyerPhone: s.phone, buyerName, lat: Number(lat), lng: Number(lng), address, sellerPhone: p.sellerPhone, createdAt: Date.now() };
       DATA.orders.push(order);
       results.push(order);
-      const key = p.sellerPhone;
-      if (!bySeller.has(key)) bySeller.set(key, []);
-      bySeller.get(key).push(order);
+      sendSms(`p.sellerPhone, Yangi buyurtma: ${p.name}. Mijoz: ${buyerName}, Tel: ${s.phone}`);
     }
-
-    if (results.length === 0) return res.status(400).json({ ok: false, error: 'NO_VALID_ITEMS' });
-    await saveData();
-
-    // bildirishnomalar
-    const mapUrl = 'https://www.google.com/maps?q=${lat},${lng};'
-    for (const [sellerPhone, orders] of bySeller) {
-     const lines = orders.map((o) => `— ${o.productName} x${o.qty} = ${o.price * o.qty} so'm).join('\n'`);
-     const msg = `SARDOR ART: yangi buyurtma!\n${lines}\nMijoz: ${buyerName}\nTel: ${s.phone}\nManzil: ${address}\nXarita: ${mapUrl}`;
-     sendSms(sellerPhone, msg).catch((e) => console.error('seller sms:', e.message));
-      sendTelegram(
-        (`🎨 Yangi buyurtma\n${escServer(lines)}\n👤 ${escServer(buyerName)}\n📞 ${escServer(s.phone)}\n📍 ${escServer(address)}\n🗺 ${mapUrl}`)
-      ).catch((e) => console.error('tg', e.message));
-    }
-
-    res.json({ ok: true, orders: results.map((o) => ({ id: o.id, productName: o.productName, qty: o.qty })) });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: 'SERVER' });
   }
+  if (results.length === 0) return res.status(400).json({ ok: false });
+  await saveData();
+  res.json({ ok: true, orders: results });
 });
-/* ---------- SELLER: sotilganlar ---------- */
+
 app.get('/api/seller/sold', (req, res) => {
   const s = getSession(req);
-  if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
-  if (s.role !== 'seller') return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
-  const list = DATA.orders
-    .filter((o) => o.sellerPhone === s.phone)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((o) => ({
-      id: o.id,
-      productName: o.productName,
-      qty: o.qty,
-      price: o.price,
-      buyerName: o.buyerName,
-      buyerPhone: o.buyerPhone,
-      address: o.address,
-      lat: o.lat,
-      lat: o.lat,
-      lng: o.lng,
-      createdAt: o.createdAt
-    }));
+  if (!s || s.role !== 'seller') return res.status(403).json({ ok: false });
+  const list = DATA.orders.filter((o) => o.sellerPhone === s.phone).sort((a, b) => b.createdAt - a.createdAt);
   res.json({ ok: true, sold: list });
 });
 
 /* ---------- HTML routing ---------- */
-const PAGES = {
-  '/': 'index.html',
-  '/product': 'product.html',
-  '/cart': 'cart.html',
-  '/profile': 'profile.html',
-  '/login': 'login.html',
-  '/checkout': 'checkout.html',
-  '/seller': 'seller.html',
-  '/sold': 'sold.html'
-};
-for (const [route, file] of Object.entries(PAGES)) {
-  app.get(route, (req, res) => res.sendFile(path.join(ROOT, file)));
-}
+const PAGES = { '/': 'index.html', '/product': 'product.html', '/cart': 'cart.html', '/profile': 'profile.html', '/login': 'login.html', '/checkout': 'checkout.html', '/seller': 'seller.html', '/sold': 'sold.html' };
+for (const [route, file] of Object.entries(PAGES)) { app.get(route, (req, res) => res.sendFile(path.join(ROOT, file))); }
 
-// 404
-app.use((req, res) => {
-  if (req.path.startsWith('/api/')) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-  res.status(404).sendFile(path.join(ROOT, 'index.html'));
-});
-
-app.use((err, req, res, next) => {
-  console.error('Unhandled:', err);
-  if (req.path.startsWith('/api/')) return res.status(500).json({ ok: false, error: 'SERVER' });
-  res.status(500).send('Server error');
-});
+app.use((req, res) => { res.status(404).send('404'); });
 
 /* ---------- start ---------- */
 (async () => {
-  await fsp.mkdir(UPLOADS_DIR, { recursive: true });
-  await loadData();
-  app.listen(PORT, () => {
-    console.log(`SARDOR ART: http://localhost:${PORT}`);
-  });
+  try {
+    await fsp.mkdir(UPLOADS_DIR, { recursive: true });
+    await loadData();
+    app.listen(PORT, () => {
+      console.log(`SARDOR ART: http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("Serverni ishga tushirishda xatolik:", err);
+  }
 })();

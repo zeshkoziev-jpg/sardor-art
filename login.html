@@ -10,109 +10,55 @@
   <div id="site-header"></div>
   <main class="container">
     <h1 data-i18n="login_title">Kirish</h1>
-    <div class="form">
-      <label data-i18n="phone_label">Telefon raqam</label>
-      <input id="phone" class="input" type="tel" inputmode="tel" placeholder="+998901234567" autocomplete="tel" maxlength="13">
-      <button id="send" class="btn" data-i18n="send_code">Kod yuborish</button>
-      <div id="code-row" class="hidden">
-        <label data-i18n="code_label">SMS kod (6 xona)</label>
-        <input id="code" class="input" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
-        <button id="verify" class="btn primary mt-2" data-i18n="verify">Tasdiqlash</button>
-        <div id="resend-wrap" class="muted mt-2"></div>
-      </div>
-      <div id="msg" class="muted"></div>
+    <div class="form" style="text-align: center; margin-top: 40px;">
+      <p class="muted">Tizimga kirish uchun Telegram botimizdan foydalaning.</p>
+      <button id="tg-login" class="btn primary" style="font-size: 16px; padding: 15px 30px;">
+        Telegram orqali kirish
+      </button>
+      <div id="msg" class="muted mt-2" style="font-weight: bold;"></div>
     </div>
   </main>
   <div id="site-footer"></div>
   <script src="/app.js"></script>
   <script>
     window.initLogin = function () {
-      const t = window.t;
-      const phoneEl = document.getElementById('phone');
-      const codeEl = document.getElementById('code');
-      const sendBtn = document.getElementById('send');
-      const verifyBtn = document.getElementById('verify');
-      const codeRow = document.getElementById('code-row');
+      const btn = document.getElementById('tg-login');
       const msg = document.getElementById('msg');
-      const resendWrap = document.getElementById('resend-wrap');
 
-      let currentPhone = null;
-      let cooldown = 0, cdTimer = null;
-
-      function normalizePhone(v) {
-        let s = String(v || '').replace(/[\s()-]/g, '');
-        if (!s.startsWith('+')) {
-          if (s.startsWith('998')) s = '+' + s;
-          else if (/^9\d{8}$/.test(s)) s = '+998' + s;
-        }
-        return s;
-      }
-
-      function setCooldown(sec) {
-        cooldown = sec;
-        sendBtn.disabled = true;
-        clearInterval(cdTimer);
-        const tick = () => {
-          if (cooldown <= 0) {
-            sendBtn.disabled = false;
-            resendWrap.textContent = '';
-            clearInterval(cdTimer);
-            return;
-          }
-          resendWrap.textContent =' ${t(resend_in)}' , '${cooldown}s';
-          cooldown--;
-        };
-        tick();
-        cdTimer = setInterval(tick, 1000);
-      }
-
-      sendBtn.addEventListener('click', async () => {
-        msg.textContent = '';
-        const phone = normalizePhone(phoneEl.value);
-        if (!/^\+998\d{9}$/.test(phone)) {
-          msg.textContent = t('invalid_phone'); return;
-        }
-        sendBtn.disabled = true;
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        msg.textContent = 'Telegramga yo\'naltirilmoqda...';
         try {
-          await api('/api/auth/request-code', { method: 'POST', body: { phone } });
-          currentPhone = phone;
-          codeRow.classList.remove('hidden');
-          msg.textContent = t('sms_sent');
-          codeEl.focus();
-          setCooldown(60);
-        } catch (e) {
-          sendBtn.disabled = false;
-          if (e.status === 429) {
-            const d = e.data || {};
-            setCooldown(Number(d.retryAfter || 60));
-            msg.textContent = t('too_many');
-          } else {
-            msg.textContent = (e.data && e.data.error) || t('error_generic');
-          }
-        }
-      });
+          const res = await api('/api/auth/telegram/init', { method: 'POST', body: {} });
+          
+          // Yangi oynada Telegram botni ochish
+          window.open(res.url, '_blank');
+          msg.textContent = 'Iltimos, Telegramda botga raqamingizni va kodni yuboring. Kutmoqdamiz...';
 
-      verifyBtn.addEventListener('click', async () => {
-        msg.textContent = '';
-        const code = String(codeEl.value || '').replace(/\D/g, '');
-        if (!/^\d{6}$/.test(code)) {
-          msg.textContent = t('wrong_code'); return;
-        }
-        if (!currentPhone) {
-          msg.textContent = t('invalid_phone'); return;
-        }
-        verifyBtn.disabled = true;
-        try {
-          await api('/api/auth/verify', { method: 'POST', body: { phone: currentPhone, code } });
-          toast(t('login_ok'), 'ok');
-          setTimeout(() => location.href = '/profile', 500);
+          // Har 2 soniyada serverdan holatni tekshirib turamiz (Polling)
+          const interval = setInterval(async () => {
+            try {
+              const check = await api('/api/auth/telegram/check?token=' + res.token);
+              if (check.ok) {
+                clearInterval(interval);
+                msg.textContent = 'Muvaffaqiyatli kirdingiz! O\'tilmoqda...';
+                setTimeout(() => window.location.href = '/profile', 1000);
+              }
+            } catch (e) {
+              // Xatolik bo'lsa kutishda davom etamiz
+            }
+          }, 2000);
+
+          // 5 daqiqadan keyin kutishni to'xtatish (foydalanuvchi qaytmasa)
+          setTimeout(() => { 
+            clearInterval(interval); 
+            btn.disabled = false; 
+            msg.textContent = 'Vaqt tugadi. Qaytadan urinib ko\'ring.';
+          }, 300000);
+
         } catch (e) {
-          verifyBtn.disabled = false;
-          const err = (e.data && e.data.error) || '';
-          if (err === 'WRONG_CODE') msg.textContent = t('wrong_code');
-          else if (err === 'CODE_EXPIRED') msg.textContent = t('code_expired');
-          else if (err === 'TOO_MANY_ATTEMPTS') msg.textContent = t('too_many');
-          else msg.textContent = t('error_generic');
+          msg.textContent = 'Xatolik yuz berdi. Qaytadan urinib ko\'ring.';
+          btn.disabled = false;
         }
       });
     };
