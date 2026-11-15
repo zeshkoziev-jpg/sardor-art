@@ -167,77 +167,84 @@ app.get('/api/auth/telegram/check', (req, res) => {
 });
 
 app.post('/api/telegram/webhook', async (req, res) => {
-  res.sendStatus(200);
-  const { message } = req.body;
-  if (!message || !message.text) return;
-  const text = message.text.trim();
-  const chatId = message.chat.id;
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const baseUrl = process.env.BASE_URL || 'https://sardor-art.onrender.com';
+  try {
+    res.sendStatus(200);
+    const { message } = req.body;
+    if (!message || !message.text) return;
+    
+    let text = message.text.trim();
+    const chatId = message.chat.id;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const baseUrl = process.env.BASE_URL || 'https://sardor-art.onrender.com';
 
-  const sendTgMsg = async (msgText, markup = null) => {
-    const body = { chat_id: chatId, text: msgText, parse_mode: 'HTML' };
-    if (markup) body.reply_markup = markup;
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-  };
+    const sendTgMsg = async (msgText, markup = null) => {
+      const body = { chat_id: chatId, text: msgText, parse_mode: 'HTML' };
+      if (markup) body.reply_markup = markup;
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    };
 
-  let activeToken = null;
-  for (const [token, data] of Object.entries(DATA.telegramAuth)) {
-     if (data.chatId === chatId && data.status !== 'confirmed') {
-        activeToken = token; break;
-     }
-  }
+    let activeToken = null;
+    for (const [token, data] of Object.entries(DATA.telegramAuth)) {
+       if (data.chatId === chatId && data.status !== 'confirmed') {
+          activeToken = token; break;
+       }
+    }
 
-  if (text.startsWith('/start ')) {
-    const token = text.split(' ')[1];
-    if (DATA.telegramAuth[token]) {
-      DATA.telegramAuth[token].chatId = chatId;
-      DATA.telegramAuth[token].status = 'waiting_phone';
+    if (text.startsWith('/start ')) {
+      const token = text.split(' ')[1];
+      if (DATA.telegramAuth[token]) {
+        DATA.telegramAuth[token].chatId = chatId;
+        DATA.telegramAuth[token].status = 'waiting_phone';
+        await saveData();
+        await sendTgMsg("Assalomu alaykum! SARDOR ART saytiga kirish uchun iltimos, <b>telefon raqamingizni</b> yuboring.\n(Masalan: +998901234567)");
+      } else {
+        await sendTgMsg("Xatolik: Havola eskirgan. Iltimos, saytga qaytib, qaytadan urinib ko'ring.");
+      }
+      return;
+    }
+
+    if (!activeToken) return; 
+    const authData = DATA.telegramAuth[activeToken];
+
+    if (authData.status === 'waiting_phone') {
+      // Raqamdan bo'sh joy va ortiqcha belgilarni tozalash
+      const cleanPhone = text.replace(/[^\d+]/g, '');
+      if (!validatePhone(cleanPhone)) {
+        await sendTgMsg("Iltimos, telefon raqamni to'g'ri formatda kiriting.\n(Masalan: +998901234567)");
+        return;
+      }
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      authData.phone = cleanPhone;
+      authData.code = code;
+      authData.status = 'waiting_code';
       await saveData();
-      await sendTgMsg("Assalomu alaykum! SARDOR ART saytiga kirish uchun iltimos, <b>telefon raqamingizni</b> yuboring.\n(Masalan: +998901234567)");
-    } else {
-      await sendTgMsg("Xatolik: Havola eskirgan. Iltimos, saytga qaytib, qaytadan urinib ko'ring.");
-    }
-    return;
-  }
-
-  if (!activeToken) return; 
-  const authData = DATA.telegramAuth[activeToken];
-
-  if (authData.status === 'waiting_phone') {
-    if (!validatePhone(text)) {
-      await sendTgMsg("Iltimos, telefon raqamni to'g'ri formatda kiriting.\n(Masalan: +998901234567)");
+      await sendTgMsg(`Rahmat! Tizimga kirish uchun tasdiqlash kodi:\n\n👉 <b>${code}</b>\n\nIltimos, shu kodni menga qaytarib yuboring.`);
       return;
     }
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    authData.phone = text;
-    authData.code = code;
-    authData.status = 'waiting_code';
-    await saveData();
-    await sendTgMsg(`Rahmat! Tizimga kirish uchun tasdiqlash kodi:\n\n👉 <b>${code}</b>\n\nIltimos, shu kodni menga qaytarib yuboring.`);
-    return;
-  }
 
-  if (authData.status === 'waiting_code') {
-    if (text !== authData.code) {
-      await sendTgMsg("Kod xato. Iltimos qaytadan urinib ko'ring.");
+    if (authData.status === 'waiting_code') {
+      if (text !== authData.code) {
+        await sendTgMsg("Kod xato. Iltimos qaytadan urinib ko'ring.");
+        return;
+      }
+      const phone = authData.phone;
+      const firstName = message.chat.first_name || 'Mijoz';
+      if (!DATA.users[phone]) {
+        DATA.users[phone] = { phone, role: 'customer', name: firstName, createdAt: Date.now() };
+      }
+      authData.status = 'confirmed';
+      await saveData();
+      await sendTgMsg("✅ Muvaffaqiyatli ro'yxatdan o'tdingiz!\nEndi quyidagi tugma orqali saytga qaytishingiz mumkin.", {
+        inline_keyboard: [[ { text: "🌐 Saytga qaytish", url: `${baseUrl}/profile }`} ]]
+      });
       return;
     }
-    const phone = authData.phone;
-    const firstName = message.chat.first_name || 'Mijoz';
-    if (!DATA.users[phone]) {
-      DATA.users[phone] = { phone, role: 'customer', name: firstName, createdAt: Date.now() };
-    }
-    authData.status = 'confirmed';
-    await saveData();
-    await sendTgMsg("✅ Muvaffaqiyatli ro'yxatdan o'tdingiz!\nEndi quyidagi tugma orqali saytga qaytishingiz mumkin.", {
-      inline_keyboard: [[ `{ text: "🌐 Saytga qaytish", url: ${baseUrl}/profile }` ]]
-    });
-    return;
+  } catch (err) {
+    console.error("Webhook xatosi:", err); // Xatoni Render Loglarida ko'rish uchun
   }
 });
 
