@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mahsulot — SARDOR ART</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="product">
+  <div id="site-header"></div>
+  <main class="container">
+    <a href="/" class="muted" data-i18n="back">Orqaga</a>
+    <div id="product-area" class="mt-2"></div>
+  </main>
+  <div id="site-footer"></div>
+  <script src="/app.js"></script>
+  <script>
+    window.initProduct = async function () {
+      const t = window.t;
+      const area = document.getElementById('product-area');
+      const params = new URLSearchParams(location.search);
+      const id = params.get('id');
+
+      if (!id) {
+        area.innerHTML = `<p class="muted">${esc(t('error_generic'))}</p>`;
+        return;
+      }
+      try {
+        const j = await api('/api/products/' + encodeURIComponent(id));
+        const p = j.product;
+        area.innerHTML = `
+          <div class="product-layout">
+            <div class="product-media">
+              <img src="${esc(p.image)}" alt="${esc(p.name)}">
+            </div>
+            <div class="product-info">
+              <h1>${esc(p.name)}</h1>
+              <div class="muted">${esc(p.sellerName || '')}</div>
+              <div class="price mt-2">${esc(fmtMoney(p.price))}</div>
+              <div class="row mt-2">
+                <button id="buy" class="btn primary" data-i18n="add_to_cart">${esc(t('add_to_cart'))}</button>
+              </div>
+            </div>
+          </div>
+        `;
+        document.getElementById('buy').addEventListener('click', () => {
+          addToCart({ id: p.id, name: p.name, price: p.price, image: p.image, qty: 1 });
+          toast(t('added'), 'ok');
+        });
+        applyTranslations();
+      } catch (e) {
+        if (e.status === 404) {
+          area.innerHTML = `<p class="muted">404 — topilmadi.</p>`;
+        } else {
+          area.innerHTML = `<p class="error-text">${esc(t('error_generic'))}</p>`;
+        }
+      }
+    };
+  </script>
+</body>
+</html>

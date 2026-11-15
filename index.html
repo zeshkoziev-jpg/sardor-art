@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SARDOR ART</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body data-page="index">
+  <div id="site-header"></div>
+  <main class="container">
+    <h1 data-i18n="catalog_title">Asarlar</h1>
+    <div id="products" class="grid"></div>
+    <p id="empty" class="muted hidden" data-i18n="catalog_empty">Hozircha asarlar yo'q.</p>
+  </main>
+  <div id="site-footer"></div>
+  <script src="/app.js"></script>
+  <script>
+    window.initIndex = async function () {
+      const grid = document.getElementById('products');
+      const empty = document.getElementById('empty');
+      const t = window.t;
+
+      function render(list) {
+        if (!list.length) {
+          empty.classList.remove('hidden');
+          grid.innerHTML = '';
+          return;
+        }
+        empty.classList.add('hidden');
+        grid.innerHTML = list.map((p) => `
+          <a class="card" href="/product?id=${encodeURIComponent(p.id)}">
+            <div class="thumb">
+              <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy">
+            </div>
+            <div class="body">
+              <div class="title">${esc(p.name)}</div>
+              <div class="price">${esc(fmtMoney(p.price))}</div>
+            </div>
+          </a>
+        `).join('');
+      }
+
+      async function load() {
+        try {
+          const j = await api('/api/products');
+          render(j.products || []);
+        } catch (e) {
+          toast(t('error_generic'), 'error');
+        }
+      }
+      await load();
+    };
+  </script>
+</body>
+</html>

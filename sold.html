@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sotilganlar — SARDOR ART</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="sold">
+  <div id="site-header"></div>
+  <main class="container">
+    <h1 data-i18n="sold_title">Sotilganlar</h1>
+    <div id="sold-area"></div>
+  </main>
+  <div id="site-footer"></div>
+  <script src="/app.js"></script>
+  <script>
+    window.initSold = function () {
+      const t = window.t;
+      const area = document.getElementById('sold-area');
+      const user = getAuth();
+      if (!user) {
+        area.innerHTML = `
+          <p class="muted">${esc(t('login_needed'))}</p>
+          <a class="btn primary mt-2" href="/login">${esc(t('login_title'))}</a>
+        `;
+        return;
+      }
+      if (user.role !== 'seller') {
+        area.innerHTML = `<p class="muted">${esc(t('access_denied'))}. <a href="/profile">${esc(t('profile'))}</a></p>`;
+        return;
+      }
+
+      async function load() {
+        try {
+          const j = await api('/api/seller/sold');
+          if (!j.sold.length) {
+            area.innerHTML = `<p class="muted">${esc(t('no_sold'))}</p>`;
+            return;
+          }
+          const totalCount = j.sold.reduce((s, o) => s + Number(o.qty || 0), 0);
+          const totalSum = j.sold.reduce((s, o) => s + Number(o.price || 0) * Number(o.qty || 0), 0);
+          area.innerHTML = `
+            <div class="row mt-2" style="margin-bottom:12px">
+              <div class="notice">${esc(t('total_sold'))}: <b>${esc(String(totalCount))}</b></div>
+              <div class="notice">Σ: <b>${esc(fmtMoney(totalSum))}</b></div>
+            </div>
+            ${j.sold.map((o) => {
+              const mapUrl = `https://www.google.com/maps?q=${encodeURIComponent(o.lat)},${encodeURIComponent(o.lng)}`;
+              const embedUrl = `https://www.google.com/maps?q=${encodeURIComponent(o.lat)},${encodeURIComponent(o.lng)}&z=15&output=embed`;
+              return `
+                <div class="sold-card">
+                  <div class="head">
+                    <div>
+                      <b>${esc(o.productName)}</b> × ${esc(String(o.qty))}
+                      <div class="muted">${esc(fmtMoney(o.price * o.qty))} - ${esc(new Date(o.createdAt).toLocaleString())}</div>
+                    </div>
+                    <div class="muted" style="text-align:right">
+                      ${esc(t('buyer'))}: <b>${esc(o.buyerName)}</b><br>
+                      <a href="tel:${esc(o.buyerPhone)}">${esc(o.buyerPhone)}</a>
+                    </div>
+                  </div>
+                  <div class="muted mt-2">${esc(o.address)}</div>
+                  <a class="btn mt-2" href="${esc(mapUrl)}" target="_blank" rel="noopener">${esc(t('map_open'))}</a>
+                  <iframe class="map-embed" loading="lazy" src="${esc(embedUrl)}"
+                    referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              `;
+            }).join('')}
+          `;
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) {
+            area.innerHTML = `<p class="muted">${esc(t('access_denied'))}</p>`;
+          } else {
+            area.innerHTML = `<p class="error-text">${esc(t('error_generic'))}</p>`;
+          }
+        }
+      }
+      load();
+      document.addEventListener('langchange', load);
+    };
+  </script>
+</body>
+</html>

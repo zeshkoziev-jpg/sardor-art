@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buyurtma — SARDOR ART</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="checkout">
+  <div id="site-header"></div>
+  <main class="container">
+    <h1 data-i18n="checkout_title">Buyurtmani rasmiylashtirish</h1>
+    <div id="checkout-area"></div>
+  </main>
+  <div id="site-footer"></div>
+  <script src="/app.js"></script>
+  <script>
+    window.initCheckout = function () {
+      const t = window.t;
+      const area = document.getElementById('checkout-area');
+      const user = getAuth();
+      if (!user) {
+        area.innerHTML = `
+          <p class="muted">${esc(t('login_needed'))}</p>
+          <a href="/login" class="btn primary mt-2" data-i18n="login_title">${esc(t('login_title'))}</a>
+        `;
+        return;
+      }
+      const cart = getCart();
+      if (!cart.length) {
+        area.innerHTML = `<p class="muted" data-i18n="cart_empty">${esc(t('cart_empty'))}</p>`;
+        return;
+      }
+
+      let lat = null, lng = null, address = '';
+
+      area.innerHTML = `
+        <div class="row" style="align-items:flex-start">
+          <div class="form" style="flex:1; min-width:280px">
+            <label data-i18n="name">Ism</label>
+            <input id="buyer-name" class="input" maxlength="80" autocomplete="name">
+            <label data-i18n="phone">Telefon</label>
+            <input id="buyer-phone" class="input" value="${esc(user.phone)}" readonly>
+            <label data-i18n="address">Manzil</label>
+            <textarea id="buyer-address" maxlength="300" placeholder="Toshkent, ..."></textarea>
+            <div class="row">
+              <button id="loc-btn" class="btn" data-i18n="get_location">${esc(t('get_location'))}</button>
+              <span id="loc-status" class="muted"></span>
+            </div>
+            <div id="map-slot"></div>
+            <div class="total">
+              <span data-i18n="total">${esc(t('total'))}:</span>
+              <span class="amount">${esc(fmtMoney(cartTotal()))}</span>
+            </div>
+            <button id="submit-btn" class="btn primary" data-i18n="submit_order">${esc(t('submit_order'))}</button>
+            <div id="err" class="error-text"></div>
+          </div>
+        </div>
+      `;
+
+      const nameEl = document.getElementById('buyer-name');
+      const addrEl = document.getElementById('buyer-address');
+      const locBtn = document.getElementById('loc-btn');
+      const locStatus = document.getElementById('loc-status');
+      const mapSlot = document.getElementById('map-slot');
+      const errEl = document.getElementById('err');
+      const submitBtn = document.getElementById('submit-btn');
+
+      function renderMap() {
+        if (lat == null || lng == null) { mapSlot.innerHTML = ''; return; }
+        mapSlot.innerHTML = `
+          <iframe class="map-embed" loading="lazy"
+            src="https://www.google.com/maps?q=${encodeURIComponent(lat)},${encodeURIComponent(lng)}&z=16&output=embed"
+            referrerpolicy="no-referrer-when-downgrade"></iframe>
+        `;
+      }
+
+      locBtn.addEventListener('click', () => {
+        if (!('geolocation' in navigator)) {
+          toast(t('location_err'), 'error'); return;
+        }
+        locStatus.textContent = t('loading');
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            lat = pos.coords.latitude;
+            lng = pos.coords.longitude;
+            locStatus.textContent = t('location_ok');
+            renderMap();
+          },
+          (err) => {
+            console.error(err);
+            locStatus.textContent = t('location_err');
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+      });
+
+      submitBtn.addEventListener('click', async () => {
+        errEl.textContent = '';
+        if (!nameEl.value.trim() || !addrEl.value.trim()) {
+          errEl.textContent = t('required'); return;
+        }
+        if (lat == null || lng == null) {
+          errEl.textContent = t('location_err'); return;
+        }
+        const items = cart.map((x) => ({ productId: x.id, qty: x.qty }));
+        submitBtn.disabled = true;
+        try {
+          await api('/api/orders', {
+            method: 'POST',
+            body: {
+              items,
+              buyerName: nameEl.value.trim(),
+              lat, lng,
+              address: addrEl.value.trim()
+            }
+          });
+          clearCart();
+          toast(t('order_ok'), 'ok');
+          setTimeout(() => location.href = '/', 900);
+        } catch (e) {
+          errEl.textContent = (e.data && e.data.error) || t('error_generic');
+          submitBtn.disabled = false;
+        }
+      });
+    };
+  </script>
+</body>
+</html>
