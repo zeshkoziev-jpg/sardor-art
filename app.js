@@ -72,7 +72,7 @@
   window.applyTranslations = applyTranslations;
 
   async function api(url, opts = {}) {
-    const opt = `{ method: opts.method  'GET', credentials: 'same-origin', headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers  {}) }`;
+    const opt =` { method: opts.method  'GET', credentials: 'same-origin', headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers  {}) }`;
     if (opts.body !== undefined) opt.body = JSON.stringify(opts.body);
     const r = await fetch(url, opt);
     let j = null;
@@ -133,7 +133,7 @@
       const sellerLink = user.role === 'seller' ? `<a href="/seller" data-i18n="seller">${esc(t('seller'))}</a><a href="/sold" data-i18n="sold">${esc(t('sold'))}</a>` : '';
       right = `<a href="/" data-i18n="home">${esc(t('home'))}</a>${sellerLink}<a href="/profile" data-i18n="profile">${esc(t('profile'))}</a><a href="/cart" id="cart-link" data-i18n="cart">${esc(t('cart'))}<span class="badge hidden"></span></a><button id="logout-btn" data-i18n="logout">${esc(t('logout'))}</button>`;
     } else {
-      right = `<a href="/" data-i18n="home">${esc(t('home'))}</a><a href="/login" data-i18n="profile">${esc(t('profile'))}</a><a href="/cart" id="cart-link" data-i18n="cart">${esc(t('cart'))}<span class="badge hidden"></span></a>;`
+      right = `<a href="/" data-i18n="home">${esc(t('home'))}</a><a href="/login" data-i18n="profile">${esc(t('profile'))}</a><a href="/cart" id="cart-link" data-i18n="cart">${esc(t('cart'))}<span class="badge hidden"></span></a>`;
     }
     host.innerHTML = <div class="site-header"><a class="brand" href="/">SARDOR ART</a><nav class="nav">${right}</nav></div>;
     updateCartBadge();
