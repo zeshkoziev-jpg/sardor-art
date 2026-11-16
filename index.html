@@ -7,19 +7,56 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body data-page="index">
+  <!-- Orqa fondagi stikerlar uchun konteyner -->
+  <div class="sticker-bg">
+    <span>🎨</span><span>🖌️</span><span>🖼️</span><span>🎭</span><span>🎻</span><span>✨</span><span>🎨</span><span>🖌️</span>
+  </div>
+
   <div id="site-header"></div>
+
   <main class="container">
-    <h1 data-i18n="catalog_title">Asarlar</h1>
-    <div id="products" class="grid"></div>
-    <p id="empty" class="muted hidden" data-i18n="catalog_empty">Hozircha asarlar yo'q.</p>
+    <!-- Qidiruv qismi -->
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Asar nomini kiriting...">
+      <button id="search-btn" class="btn primary">Qidirish</button>
+    </div>
+
+    <div class="main-layout">
+      <!-- Chap menyu: Janrlar -->
+      <aside class="sidebar">
+        <h3>Janrlar</h3>
+        <ul id="genre-list">
+          <li data-genre="Barchasi" class="active">Barchasi</li>
+          <li data-genre="Manzara">Manzara</li>
+          <li data-genre="Portret">Portret</li>
+          <li data-genre="Abstrakt">Abstrakt</li>
+          <li data-genre="Natyurmort">Natyurmort</li>
+          <li data-genre="Realizm">Realizm</li>
+          <li data-genre="Zamonaviy">Zamonaviy</li>
+        </ul>
+      </aside>
+
+      <!-- Asarlar ro'yxati -->
+      <div class="content-area">
+        <h2 data-i18n="catalog_title">Asarlar</h2>
+        <div id="products" class="grid"></div>
+        <p id="empty" class="muted hidden" data-i18n="catalog_empty">Hech narsa topilmadi.</p>
+      </div>
+    </div>
   </main>
+
   <div id="site-footer"></div>
   <script src="/app.js"></script>
   <script>
     window.initIndex = async function () {
       const grid = document.getElementById('products');
       const empty = document.getElementById('empty');
+      const searchInput = document.getElementById('search-input');
+      const searchBtn = document.getElementById('search-btn');
+      const genreList = document.getElementById('genre-list');
       const t = window.t;
+
+      let currentGenre = 'Barchasi';
 
       function render(list) {
         if (!list.length) {
@@ -30,11 +67,10 @@
         empty.classList.add('hidden');
         grid.innerHTML = list.map((p) => `
           <a class="card" href="/product?id=${encodeURIComponent(p.id)}">
-            <div class="thumb">
-              <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy">
-            </div>
+            <div class="thumb"><img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy"></div>
             <div class="body">
               <div class="title">${esc(p.name)}</div>
+              <div class="muted" style="font-size:12px">${esc(p.genre)}</div>
               <div class="price">${esc(fmtMoney(p.price))}</div>
             </div>
           </a>
@@ -43,12 +79,29 @@
 
       async function load() {
         try {
-          const j = await api('/api/products');
+          const q = searchInput.value.trim();
+          const url = `/api/products?q=${encodeURIComponent(q)}&genre=${encodeURIComponent(currentGenre)}`;
+          const j = await api(url);
           render(j.products || []);
         } catch (e) {
           toast(t('error_generic'), 'error');
         }
       }
+
+      // Qidiruv tugmasi va Enter
+      searchBtn.addEventListener('click', load);
+      searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') load(); });
+
+      // Janr tanlash
+      genreList.addEventListener('click', (e) => {
+        if (e.target.tagName === 'LI') {
+          genreList.querySelectorAll('li').forEach(li => li.classList.remove('active'));
+          e.target.classList.add('active');
+          currentGenre = e.target.getAttribute('data-genre');
+          load();
+        }
+      });
+
       await load();
     };
   </script>

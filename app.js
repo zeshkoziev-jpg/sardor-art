@@ -393,7 +393,8 @@
       const sellerLink = user.role === 'seller'
         ? `<a href="/seller" data-i18n="seller">${esc(t('seller'))}</a><a href="/sold" data-i18n="sold">${esc(t('sold'))}</a>`
         : '';
-      right = `${sellerLink}<a href="/profile" data-i18n="profile">${esc(t('profile'))}</a><a href="/cart" id="cart-link" data-i18n="cart">${esc(t('cart'))}<span class="badge hidden"></span></a><button id="logout-btn" data-i18n="logout">${esc(t('logout'))}</button>`;
+      right = <a href="/" data-i18n="home">${esc(t('home'))}</a>
+       `${sellerLink}<a href="/profile" data-i18n="profile">${esc(t('profile'))}</a><a href="/cart" id="cart-link" data-i18n="cart">${esc(t('cart'))}<span class="badge hidden"></span></a><button id="logout-btn" data-i18n="logout">${esc(t('logout'))}</button>`;
     } else {
       right = `
         <a href="/login" data-i18n="profile">${esc(t('profile'))}</a>

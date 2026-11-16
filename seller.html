@@ -20,10 +20,8 @@
       const area = document.getElementById('seller-area');
       const user = getAuth();
       if (!user) {
-        area.innerHTML = `
-          <p class="muted">${esc(t('login_needed'))}</p>
-          <a class="btn primary mt-2" href="/login">${esc(t('login_title'))}</a>
-        `;
+        area.innerHTML = `<p class="muted">${esc(t('login_needed'))}</p>
+          <a class="btn primary mt-2" href="/login">${esc(t('login_title'))}</a>`;
         return;
       }
       if (user.role !== 'seller') {
@@ -37,8 +35,30 @@
           <div class="form">
             <label data-i18n="product_name">Asar nomi</label>
             <input id="p-name" class="input" maxlength="80">
+            
+            <!-- Yangi: Janr tanlash -->
+            <label>Asar janri</label>
+            <select id="p-genre" class="input">
+              <option value="Manzara">Manzara</option>
+              <option value="Portret">Portret</option>
+              <option value="Abstrakt">Abstrakt</option>
+              <option value="Natyurmort">Natyurmort</option>
+              <option value="Realizm">Realizm</option>
+              <option value="Zamonaviy">Zamonaviy</option>
+              <option value="Boshqa">Boshqa</option>
+            </select>
+
             <label data-i18n="price">Narx (so'm)</label>
             <input id="p-price" class="input" type="number" min="1" max="1000000000" step="1">
+
+            <!-- Yangi: To'lov turi -->
+            <label>To'lov turi</label>
+            <select id="p-payment" class="input">
+              <option value="100% oldindan">100% oldindan</option>
+              <option value="50% oldindan, 50% keyin">50% oldindan, 50% keyin</option>
+              <option value="100% keyin">100% keyin</option>
+            </select>
+
             <label data-i18n="image">Rasm</label>
             <input id="p-file" type="file" accept="image/jpeg,image/png,image/webp">
             <img id="p-preview" class="hidden" style="max-width:220px;border-radius:10px;margin-top:8px" alt="">
@@ -58,6 +78,8 @@
 
       const nameEl = document.getElementById('p-name');
       const priceEl = document.getElementById('p-price');
+      const genreEl = document.getElementById('p-genre');
+      const paymentEl = document.getElementById('p-payment');
       const fileEl = document.getElementById('p-file');
       const preview = document.getElementById('p-preview');
       const pubEl = document.getElementById('p-public');
@@ -123,24 +145,22 @@
             worksEl.innerHTML = `<p class="muted">${esc(t('no_works'))}</p>`;
             return;
           }
-          worksEl.innerHTML = `
-            <div class="grid">
-              ${j.products.map((p) => `
-                <div class="card" data-id="${esc(p.id)}">
-                  <div class="thumb"><img src="${esc(p.image)}" alt="${esc(p.name)}"></div>
-                  <div class="body">
-                    <div class="title">${esc(p.name)}</div>
-                    <div class="price">${esc(fmtMoney(p.price))}</div>
-                    <div class="muted">${p.public ? '✓ ' + t('make_public') : '✕'}</div>
-                    <div class="row mt-2">
-                      <button class="btn" data-act="toggle">${p.public ? 'Off' : t('make_public')}</button>
-                      <button class="btn danger" data-act="del">${esc(t('delete'))}</button>
-                    </div>
-                  </div>
+          worksEl.innerHTML = `<div class="grid">${j.products.map((p) => `
+            <div class="card" data-id="${esc(p.id)}">
+              <div class="thumb"><img src="${esc(p.image)}" alt="${esc(p.name)}"></div>
+              <div class="body">
+                <div class="title">${esc(p.name)}</div>
+                <div class="muted" style="font-size:12px">Janr: ${esc(p.genre)}</div>
+                <div class="muted" style="font-size:12px">To'lov: ${esc(p.paymentType)}</div>
+                <div class="price">${esc(fmtMoney(p.price))}</div>
+                <div class="muted">${p.public ? '✓ ' + t('make_public') : '✕'}</div>
+                <div class="row mt-2">
+                  <button class="btn" data-act="toggle">${p.public ? 'Off' : t('make_public')}</button>
+                  <button class="btn danger" data-act="del">${esc(t('delete'))}</button>
                 </div>
-              `).join('')}
+              </div>
             </div>
-          `;
+          `).join('')}</div>`;
 
           worksEl.querySelectorAll('.card').forEach((card) => {
             const id = card.getAttribute('data-id');
@@ -181,8 +201,9 @@
           await api('/api/seller/products', {
             method: 'POST',
             body: {
-              name,
-              price,
+              name, price,
+              genre: genreEl.value,
+              paymentType: paymentEl.value,
               imageBase64: pendingFile.base64,
               imageType: pendingFile.type,
               isPublic: !!pubEl.checked
@@ -202,7 +223,6 @@
       });
 
       renderWorks();
-      document.addEventListener('langchange', renderWorks);
     };
   </script>
 </body>

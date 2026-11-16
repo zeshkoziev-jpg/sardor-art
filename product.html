@@ -30,12 +30,16 @@
         const p = j.product;
         area.innerHTML = `
           <div class="product-layout">
-            <div class="product-media">
-              <img src="${esc(p.image)}" alt="${esc(p.name)}">
-            </div>
+            <div class="product-media"><img src="${esc(p.image)}" alt="${esc(p.name)}"></div>
             <div class="product-info">
               <h1>${esc(p.name)}</h1>
               <div class="muted">${esc(p.sellerName || '')}</div>
+              
+              <div class="mt-2" style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; font-size:14px;">
+                <div><b>Janr:</b> ${esc(p.genre)}</div>
+                <div><b>To'lov sharti:</b> ${esc(p.paymentType)}</div>
+              </div>
+
               <div class="price mt-2">${esc(fmtMoney(p.price))}</div>
               <div class="row mt-2">
                 <button id="buy" class="btn primary" data-i18n="add_to_cart">${esc(t('add_to_cart'))}</button>

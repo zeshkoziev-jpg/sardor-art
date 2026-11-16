@@ -1,7 +1,6 @@
 'use strict';
 
 require('dotenv').config();
-// Render'dagi Secret Files (.env) ni o'qish uchun:
 require('dotenv').config({ path: '/etc/secrets/.env' });
 
 const express = require('express');
@@ -17,19 +16,19 @@ const DATA_FILE = path.join(ROOT, 'data.json');
 const UPLOADS_DIR = path.join(ROOT, 'uploads');
 
 const PHONE_RE = /^\+998\d{9}$/;
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024; 
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_IMAGE_BASE64 = Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 /* ---------- data.json ---------- */
 const DEFAULT_DATA = {
-  sessions: {},     
-  users: {},        
-  products: [],     
-  orders: [],       
-  smsCodes: {},     
-  telegramAuth: {}, 
-  rateLimit: {}     
+  sessions: {},
+  users: {},
+  products: [],
+  orders: [],
+  smsCodes: {},
+  telegramAuth: {},
+  rateLimit: {}
 };
 
 let DATA = null;
@@ -86,16 +85,6 @@ function validateName(n) { return typeof n === 'string' && n.trim().length >= 2 
 function validatePrice(p) { const n = Number(p); return Number.isFinite(n) && n > 0 && n <= 1000000000 && Math.floor(n) === n; }
 function validateLatLng(lat, lng) { const la = Number(lat), ln = Number(lng); return Number.isFinite(la) && Number.isFinite(ln) && la >= -90 && la <= 90 && ln >= -180 && ln <= 180; }
 
-/* ---------- Rate Limit (Xatosiz sodda versiya) ---------- */
-function rateLimit() {
-  return (req, res, next) => { next(); };
-}
-
-/* ---------- SMS (Test rejimi, chunki Telegramga o'tdik) ---------- */
-async function sendSms(phone, message) {
-  console.log`(\n[SMS-DEV] ${phone}: ${message}\n)`;
-}
-
 /* ---------- Express ---------- */
 const app = express();
 app.disable('x-powered-by');
@@ -125,6 +114,7 @@ app.use(cookieParser());
 
 app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
 app.use(express.static(ROOT, { index: false }));
+
 /* ---------- AUTH & TELEGRAM ---------- */
 app.get('/api/auth/me', (req, res) => {
   const s = getSession(req);
@@ -146,8 +136,8 @@ app.post('/api/auth/telegram/init', (req, res) => {
   }
   DATA.telegramAuth[token] = { status: 'pending', createdAt: Date.now() };
   saveData();
-  const botName = process.env.TELEGRAM_BOT_NAME || 'SardorArtBot'; 
-  res.json({ ok: true, token, url: `https://t.me/${botName}?start=${token} `});
+  const botName = process.env.TELEGRAM_BOT_NAME || 'SardorArtBot';
+  res.json({ ok: true, token, url: `https://t.me/${botName}?start=${token}` });
 });
 
 app.get('/api/auth/telegram/check', (req, res) => {
@@ -169,9 +159,8 @@ app.get('/api/auth/telegram/check', (req, res) => {
 app.post('/api/telegram/webhook', async (req, res) => {
   try {
     res.sendStatus(200);
-    const { message } = req.body;
+    const { message } = req.body || {};
     if (!message || !message.text) return;
-    
     let text = message.text.trim();
     const chatId = message.chat.id;
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -189,9 +178,10 @@ app.post('/api/telegram/webhook', async (req, res) => {
 
     let activeToken = null;
     for (const [token, data] of Object.entries(DATA.telegramAuth)) {
-       if (data.chatId === chatId && data.status !== 'confirmed') {
-          activeToken = token; break;
-       }
+      if (data.chatId === chatId && data.status !== 'confirmed') {
+        activeToken = token;
+        break;
+      }
     }
 
     if (text.startsWith('/start ')) {
@@ -207,11 +197,10 @@ app.post('/api/telegram/webhook', async (req, res) => {
       return;
     }
 
-    if (!activeToken) return; 
+    if (!activeToken) return;
     const authData = DATA.telegramAuth[activeToken];
 
     if (authData.status === 'waiting_phone') {
-      // Raqamdan bo'sh joy va ortiqcha belgilarni tozalash
       const cleanPhone = text.replace(/[^\d+]/g, '');
       if (!validatePhone(cleanPhone)) {
         await sendTgMsg("Iltimos, telefon raqamni to'g'ri formatda kiriting.\n(Masalan: +998901234567)");
@@ -239,16 +228,16 @@ app.post('/api/telegram/webhook', async (req, res) => {
       authData.status = 'confirmed';
       await saveData();
       await sendTgMsg("✅ Muvaffaqiyatli ro'yxatdan o'tdingiz!\nEndi quyidagi tugma orqali saytga qaytishingiz mumkin.", {
-        inline_keyboard: [[ { text: "🌐 Saytga qaytish", url: `${baseUrl}/profile }`} ]]
+        inline_keyboard: [[{ text: "🌐 Saytga qaytish", url: `${baseUrl}/profile` }]]
       });
       return;
     }
   } catch (err) {
-    console.error("Webhook xatosi:", err); // Xatoni Render Loglarida ko'rish uchun
+    console.error("Webhook xatosi:", err);
   }
 });
 
-/* ---------- PROFILE & PRODUCTS ---------- */
+/* ---------- PROFILE & PRODUCTS (QIDIRUV VA JANRLAR BILAN) ---------- */
 app.post('/api/profile/role', (req, res) => {
   const s = getSession(req);
   if (!s) return res.status(401).json({ ok: false, error: 'UNAUTH' });
@@ -260,15 +249,44 @@ app.post('/api/profile/role', (req, res) => {
   res.json({ ok: true, role });
 });
 
+// Qidiruv va Janr bo'yicha filterlash
 app.get('/api/products', (req, res) => {
-  const list = DATA.products.filter((p) => p.public).sort((a, b) => b.createdAt - a.createdAt).map((p) => ({ id: p.id, name: p.name, price: p.price, image: p.image }));
-  res.json({ ok: true, products: list });
+  let list = DATA.products.filter((p) => p.public);
+
+  const { q, genre } = req.query;
+  if (q) list = list.filter((p) => p.name.toLowerCase().includes(String(q).toLowerCase()));
+  if (genre && genre !== 'Barchasi') list = list.filter((p) => p.genre === genre);
+
+  list.sort((a, b) => b.createdAt - a.createdAt);
+  res.json({
+    ok: true,
+    products: list.map((p) => ({
+      id: p.id,
+      name: p.name,
+      price: p.price,
+      image: p.image,
+      genre: p.genre || 'Boshqa',
+      paymentType: p.paymentType || '100% oldindan'
+    }))
+  });
 });
 
 app.get('/api/products/:id', (req, res) => {
   const p = DATA.products.find((x) => x.id === req.params.id);
   if (!p || !p.public) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-  res.json({ ok: true, product: { id: p.id, name: p.name, price: p.price, image: p.image, sellerName: p.sellerName, createdAt: p.createdAt } });
+  res.json({
+    ok: true,
+    product: {
+      id: p.id,
+      name: p.name,
+      price: p.price,
+      image: p.image,
+      sellerName: p.sellerName,
+      createdAt: p.createdAt,
+      genre: p.genre || 'Boshqa',
+      paymentType: p.paymentType || '100% oldindan'
+    }
+  });
 });
 
 /* ---------- SELLER ---------- */
@@ -282,17 +300,37 @@ app.get('/api/seller/products', (req, res) => {
 app.post('/api/seller/products', async (req, res) => {
   const s = getSession(req);
   if (!s || s.role !== 'seller') return res.status(403).json({ ok: false });
-  const { name, price, imageBase64, imageType, isPublic } = req.body || {};
+  const { name, price, imageBase64, imageType, isPublic, genre, paymentType } = req.body || {};
+
   if (!validateName(name) || !validatePrice(price)) return res.status(400).json({ ok: false });
-  
+  if (
+    typeof imageBase64 !== 'string' ||
+    imageBase64.length === 0 ||
+    imageBase64.length > MAX_IMAGE_BASE64 ||
+    !ALLOWED_IMAGE_TYPES.has(imageType)
+  ) {
+    return res.status(400).json({ ok: false, error: 'INVALID_IMAGE' });
+  }
+
   const id = crypto.randomBytes(10).toString('hex');
   const ext = imageType === 'image/png' ? 'png' : imageType === 'image/webp' ? 'webp' : 'jpg';
   const filename = `${id}.${ext}`;
-  
+
   await fsp.mkdir(UPLOADS_DIR, { recursive: true });
   await fsp.writeFile(path.join(UPLOADS_DIR, filename), Buffer.from(imageBase64, 'base64'));
 
-  const product = { id, name, price: Number(price), image: '/uploads/' + filename, sellerPhone: s.phone, sellerName: 'Savdogar ' + s.phone.slice(-4), public: !!isPublic, createdAt: Date.now() };
+  const product = {
+    id,
+    name: name.trim(),
+    price: Number(price),
+    image: '/uploads/' + filename,
+    sellerPhone: s.phone,
+    sellerName: 'Savdogar ' + s.phone.slice(-4),
+    public: !!isPublic,
+    createdAt: Date.now(),
+    genre: genre || 'Boshqa',
+    paymentType: paymentType || '100% oldindan'
+  };
   DATA.products.push(product);
   await saveData();
   res.json({ ok: true, product });
@@ -323,16 +361,30 @@ app.post('/api/orders', async (req, res) => {
   const s = getSession(req);
   if (!s || s.role !== 'customer') return res.status(403).json({ ok: false });
   const { items, buyerName, lat, lng, address } = req.body || {};
-  if (!validateName(buyerName) || !validateLatLng(lat, lng)) return res.status(400).json({ ok: false });
+  if (!Array.isArray(items) || !validateName(buyerName) || !validateLatLng(lat, lng)) {
+    return res.status(400).json({ ok: false });
+  }
 
   const results = [];
   for (const it of items) {
     const p = DATA.products.find((x) => x.id === it.productId);
     if (p && p.public) {
-      const order = { id: crypto.randomBytes(10).toString('hex'), productId: p.id, productName: p.name, price: p.price, qty: Number(it.qty)||1, buyerPhone: s.phone, buyerName, lat: Number(lat), lng: Number(lng), address, sellerPhone: p.sellerPhone, createdAt: Date.now() };
+      const order = {
+        id: crypto.randomBytes(10).toString('hex'),
+        productId: p.id,
+        productName: p.name,
+        price: p.price,
+        qty: Number(it.qty) || 1,
+        buyerPhone: s.phone,
+        buyerName: buyerName.trim(),
+        lat: Number(lat),
+        lng: Number(lng),
+        address,
+        sellerPhone: p.sellerPhone,
+        createdAt: Date.now()
+      };
       DATA.orders.push(order);
       results.push(order);
-      sendSms(`p.sellerPhone, Yangi buyurtma: ${p.name}. Mijoz: ${buyerName}, Tel: ${s.phone}`);
     }
   }
   if (results.length === 0) return res.status(400).json({ ok: false });
@@ -348,20 +400,27 @@ app.get('/api/seller/sold', (req, res) => {
 });
 
 /* ---------- HTML routing ---------- */
-const PAGES = { '/': 'index.html', '/product': 'product.html', '/cart': 'cart.html', '/profile': 'profile.html', '/login': 'login.html', '/checkout': 'checkout.html', '/seller': 'seller.html', '/sold': 'sold.html' };
-for (const [route, file] of Object.entries(PAGES)) { app.get(route, (req, res) => res.sendFile(path.join(ROOT, file))); }
+const PAGES = {
+  '/': 'index.html',
+  '/product': 'product.html',
+  '/cart': 'cart.html',
+  '/profile': 'profile.html',
+  '/login': 'login.html',
+  '/checkout': 'checkout.html',
+  '/seller': 'seller.html',
+  '/sold': 'sold.html'
+};
+for (const [route, file] of Object.entries(PAGES)) {
+  app.get(route, (req, res) => res.sendFile(path.join(ROOT, file)));
+}
 
 app.use((req, res) => { res.status(404).send('404'); });
 
 /* ---------- start ---------- */
 (async () => {
-  try {
-    await fsp.mkdir(UPLOADS_DIR, { recursive: true });
-    await loadData();
-    app.listen(PORT, () => {
-      console.log(`SARDOR ART: http://localhost:${PORT}`);
-    });
-  } catch (err) {
-    console.error("Serverni ishga tushirishda xatolik:", err);
-  }
+  await fsp.mkdir(UPLOADS_DIR, { recursive: true });
+  await loadData();
+  app.listen(PORT, () => {
+    console.log(`SARDOR ART: http://localhost:${PORT}`);
+  });
 })();
