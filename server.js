@@ -271,9 +271,13 @@ app.get('/api/products', (req, res) => {
   });
 });
 
-app.get('/api/products/:id', (req, res) => {
-  const p = DATA.products.find((x) => x.id === req.params.id);
-  if (!p || !p.public) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
+  if (req.path.endsWith('.js') || req.path.endsWith('.css')) {
+    return res.status(404).send('File not found');
+  }
+  res.status(404).sendFile(path.join(ROOT, 'index.html'));
+});
   res.json({
     ok: true,
     product: {
@@ -287,7 +291,6 @@ app.get('/api/products/:id', (req, res) => {
       paymentType: p.paymentType || '100% oldindan'
     }
   });
-});
 
 /* ---------- SELLER ---------- */
 app.get('/api/seller/products', (req, res) => {
